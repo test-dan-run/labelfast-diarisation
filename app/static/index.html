@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>labelfast</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<main id="home" hidden>
+  <h1>labelfast</h1>
+  <p class="muted">Transcription and diarisation annotation.</p>
+
+  <form id="new">
+    <label class="slot" id="slot-audio">
+      <input type="file" id="in-audio" hidden>
+      <span class="slot-key">Audio</span>
+      <span class="slot-value">Drop a file here, or click to choose</span>
+    </label>
+    <label class="slot" id="slot-labels">
+      <input type="file" id="in-labels" accept=".rttm,.json,.jsonl" hidden>
+      <span class="slot-key">Pseudo-labels <em>optional</em></span>
+      <span class="slot-value">.rttm or NeMo .json — leave empty to start from scratch</span>
+      <button type="button" id="clear-labels" class="plain" title="Remove" hidden>×</button>
+    </label>
+    <button type="submit" id="create" class="primary" disabled>Start annotating</button>
+  </form>
+
+  <section id="projects"></section>
+</main>
+
+<div id="editor" hidden>
+  <header>
+    <a href="#/" class="plain" title="Back to projects">←</a>
+    <strong id="name"></strong>
+    <span id="status" class="muted"></span>
+    <span class="spacer"></span>
+    <label class="btn" title="Replace the segments with an .rttm or NeMo .json file">
+      Import labels<input type="file" id="in-import" accept=".rttm,.json,.jsonl" hidden>
+    </label>
+    <button id="export-rttm" title="Speaker turns only. RTTM has no field for the transcript">Export RTTM</button>
+    <button id="export-nemo" title="NeMo manifest: one JSON object per segment, with transcript and speaker">Export NeMo JSON</button>
+    <button id="open-help" title="Hotkeys (?)">?</button>
+  </header>
+
+  <section id="timeline">
+    <div id="lanes"></div>
+    <div id="stage">
+      <canvas id="canvas"></canvas>
+      <div id="minimap" title="Drag to move through the recording"><div id="thumb"></div></div>
+    </div>
+  </section>
+
+  <div id="transport">
+    <button id="play" title="Play / pause (Tab)">▶</button>
+    <span id="clock" class="mono"></span>
+    <select id="rate" title="Playback speed">
+      <option value="0.5">0.5×</option>
+      <option value="0.75">0.75×</option>
+      <option value="1" selected>1×</option>
+      <option value="1.25">1.25×</option>
+      <option value="1.5">1.5×</option>
+      <option value="2">2×</option>
+    </select>
+    <label class="check" title="Play each segment when moving to it"><input type="checkbox" id="autoplay" checked> auto-play</label>
+    <span class="spacer"></span>
+    <span id="count" class="muted"></span>
+    <button id="zoom-out" title="Zoom out (−)">−</button>
+    <button id="zoom-in" title="Zoom in (+)">+</button>
+  </div>
+
+  <div id="list"></div>
+</div>
+
+<dialog id="help">
+  <h2>Hotkeys</h2>
+  <table>
+    <tr><td><kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>Next / previous segment, ready to type</td></tr>
+    <tr><td><kbd>Tab</kbd></td><td>Play / pause</td></tr>
+    <tr><td><kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>Replay the segment from its start</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Leave the text field</td></tr>
+  </table>
+  <p class="muted">The keys below work on their own outside a text field. While typing, hold <kbd>Alt</kbd>.</p>
+  <table>
+    <tr><td><kbd>1</kbd>–<kbd>9</kbd></td><td>Assign speaker (the next free number adds a speaker)</td></tr>
+    <tr><td><kbd>N</kbd></td><td>New segment at the playhead</td></tr>
+    <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Set segment start / end to the playhead</td></tr>
+    <tr><td><kbd>S</kbd></td><td>Split at the playhead (and at the text cursor)</td></tr>
+    <tr><td><kbd>M</kbd></td><td>Merge with the next segment</td></tr>
+    <tr><td><kbd>X</kbd></td><td>Delete segment</td></tr>
+  </table>
+  <p class="muted">Outside a text field only:</p>
+  <table>
+    <tr><td><kbd>Space</kbd></td><td>Play / pause</td></tr>
+    <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Previous / next segment</td></tr>
+    <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Seek 1 s (5 s with <kbd>Shift</kbd>)</td></tr>
+    <tr><td><kbd>+</kbd> / <kbd>−</kbd></td><td>Zoom (also <kbd>Ctrl</kbd>+scroll)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>Undo / redo</td></tr>
+  </table>
+  <p class="muted">Mouse: click the timeline to seek, drag to draw a segment, drag a segment edge to resize, double-click a segment to play it. Click a speaker name on the left to rename it.</p>
+  <form method="dialog"><button class="primary">Close</button></form>
+</dialog>
+
+<div id="menu" hidden></div>
+<div id="toast" hidden></div>
+<audio id="audio" preload="auto"></audio>
+
+<script src="app.js"></script>
+</body>
+</html>

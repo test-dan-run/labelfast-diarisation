@@ -1,0 +1,13 @@
+services:
+  labelfast:
+    build: .
+    image: labelfast
+    ports:
+      # Reachable from this machine only. Set LABELFAST_BIND=0.0.0.0 to open it to the network.
+      - "${LABELFAST_BIND:-127.0.0.1}:${LABELFAST_PORT:-8765}:8000"
+    volumes:
+      - labelfast-data:/data
+    restart: unless-stopped
+
+volumes:
+  labelfast-data:
