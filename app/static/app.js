@@ -13,7 +13,7 @@ const els = {
   home: $('#home'), editor: $('#editor'), form: $('#new'), create: $('#create'), projects: $('#projects'),
   name: $('#name'), status: $('#status'), timeline: $('#timeline'), lanes: $('#lanes'), stage: $('#stage'),
   minimap: $('#minimap'), thumb: $('#thumb'), play: $('#play'), clock: $('#clock'), rate: $('#rate'),
-  autoplay: $('#autoplay'), count: $('#count'), list: $('#list'), help: $('#help'), menu: $('#menu'), toast: $('#toast'),
+  autoplay: $('#autoplay'), count: $('#count'), relabel: $('#relabel'), list: $('#list'), help: $('#help'), menu: $('#menu'), toast: $('#toast'),
 };
 const audio = $('#audio');
 const canvas = $('#canvas');
@@ -86,7 +86,7 @@ function toast(message) {
   els.toast.textContent = message;
   els.toast.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (els.toast.hidden = true), 3500);
+  toastTimer = setTimeout(() => (els.toast.hidden = true), 2500 + message.length * 40);
 }
 
 // Home --------------------------------------------------------------------
@@ -343,6 +343,7 @@ function updateRow(row, s) {
   if (time.textContent !== range) time.textContent = range;
   if (speaker.textContent !== s.speaker) speaker.textContent = s.speaker;
   if (speaker.style.getPropertyValue('--c') !== tint) speaker.style.setProperty('--c', tint);
+  speaker.classList.toggle('verified', !!s.verified);
   if (textarea.value !== s.text) textarea.value = s.text;
   if (grow.dataset.value !== s.text) grow.dataset.value = s.text;
 }
@@ -367,7 +368,8 @@ function renderList() {
     if (row === next) next = next.nextElementSibling;
     else els.list.insertBefore(row, next);
   }
-  els.count.textContent = countLabel(state.segments.length);
+  const verified = state.segments.filter((s) => s.verified).length;
+  els.count.textContent = `${countLabel(state.segments.length)} · ${verified} verified`;
   // Moving a row to a new position drops its focus.
   if (active?.isConnected && document.activeElement !== active) {
     active.focus({ preventScroll: true });
@@ -471,7 +473,7 @@ function newSpeakerName() {
 function addSegment(start, end, speaker, focus) {
   pushUndo();
   speaker ||= seg(state.selected)?.speaker || state.speakers[0] || newSpeakerName();
-  const s = { id: uid(), start: round3(start), end: round3(end), speaker, text: '' };
+  const s = { id: uid(), start: round3(start), end: round3(end), speaker, text: '', verified: false };
   state.segments.push(s);
   sortSegments();
   if (!state.speakers.includes(speaker)) state.speakers.push(speaker);
@@ -515,7 +517,7 @@ function split() {
   // While typing, the text cursor decides which words go to which half.
   const active = document.activeElement;
   const cut = inTextField() && active.closest('.row').dataset.id === s.id ? active.selectionStart : s.text.length;
-  state.segments.push({ id: uid(), start: t, end: s.end, speaker: s.speaker, text: s.text.slice(cut).trim() });
+  state.segments.push({ id: uid(), start: t, end: s.end, speaker: s.speaker, text: s.text.slice(cut).trim(), verified: s.verified });
   s.text = s.text.slice(0, cut).trim();
   s.end = t;
   sortSegments();
@@ -552,12 +554,63 @@ function remove() {
 
 function setSpeaker(name) {
   const s = seg(state.selected);
-  if (!s || s.speaker === name) return;
+  if (!s || (s.speaker === name && s.verified)) return;
   pushUndo();
   s.speaker = name;
+  s.verified = true; // a speaker chosen by hand needs no further confirmation
   if (!state.speakers.includes(name)) state.speakers.push(name);
   renderAll();
   touch();
+}
+
+function toggleVerified() {
+  const s = seg(state.selected);
+  if (!s) return;
+  pushUndo();
+  s.verified = !s.verified;
+  renderList();
+  touch();
+  draw();
+}
+
+// Ask the server which speaker each unverified segment sounds like, judging
+// from the verified ones, and apply the answers as one undoable change.
+let relabelling = false;
+async function relabel() {
+  if (relabelling) return;
+  const verified = state.segments.filter((s) => s.verified).length;
+  if (!verified) return toast('Verify a few segments first: press V on one whose speaker is right, or assign its speaker.');
+  const id = state.project.id;
+  relabelling = true;
+  els.relabel.disabled = true;
+  els.relabel.textContent = 'Relabelling…';
+  try {
+    await save(); // the server works from what is on disk
+    if (state.dirty) return;
+    const result = await api(`/projects/${id}/relabel`, { method: 'POST' });
+    if (state.project?.id !== id) return;
+    // Edits may have happened while waiting, so check each segment again.
+    const changes = state.segments.filter((s) => !s.verified && result.labels[s.id] && result.labels[s.id] !== s.speaker);
+    if (changes.length) {
+      pushUndo();
+      for (const s of changes) {
+        s.speaker = result.labels[s.id];
+        if (!state.speakers.includes(s.speaker)) state.speakers.push(s.speaker);
+      }
+      renderAll();
+      touch();
+    }
+    const left = result.uncertain + result.too_short;
+    toast((changes.length ? `Changed the speaker of ${countLabel(changes.length)}` : 'No speakers needed changing')
+      + `, judging from ${verified} verified.`
+      + (left ? ` ${left} left alone: unlike every verified speaker, or too short to tell.` : ''));
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    relabelling = false;
+    els.relabel.disabled = false;
+    els.relabel.textContent = 'Relabel speakers';
+  }
 }
 
 // Keys 1-9: an existing speaker, or a new one for the first unused number.
@@ -747,7 +800,7 @@ function paint() {
     const isSelected = s === selected;
     ctx.beginPath();
     ctx.roundRect(x0, y, Math.max(x1 - x0, 2), height, 3);
-    ctx.globalAlpha = isSelected ? 0.85 : 0.45;
+    ctx.globalAlpha = s.verified ? 0.85 : 0.4; // solid once the speaker is verified
     ctx.fillStyle = color(lane);
     ctx.fill();
     ctx.globalAlpha = 1;
@@ -915,6 +968,7 @@ els.autoplay.checked = localStorage.getItem('autoplay') !== 'off';
 els.autoplay.addEventListener('change', () => localStorage.setItem('autoplay', els.autoplay.checked ? 'on' : 'off'));
 $('#zoom-in').addEventListener('click', () => zoom(1.5));
 $('#zoom-out').addEventListener('click', () => zoom(1 / 1.5));
+els.relabel.addEventListener('click', relabel);
 $('#export-rttm').addEventListener('click', () => exportAs('rttm'));
 $('#export-nemo').addEventListener('click', () => exportAs('nemo'));
 $('#open-help').addEventListener('click', () => els.help.showModal());
@@ -963,7 +1017,7 @@ document.addEventListener('keydown', (e) => {
   const digit = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
   if (digit) return run(() => setSpeaker(speakerForKey(Number(digit[1]))));
   const edit = {
-    KeyN: newAtPlayhead, KeyS: split, KeyM: merge, KeyX: remove,
+    KeyN: newAtPlayhead, KeyS: split, KeyM: merge, KeyX: remove, KeyV: toggleVerified, KeyR: relabel,
     BracketLeft: () => setEdge('start'), BracketRight: () => setEdge('end'),
   }[e.code];
   if (edit) return run(edit);

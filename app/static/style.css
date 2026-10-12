@@ -182,8 +182,10 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
   border-color: transparent;
-  background: color-mix(in srgb, var(--c) 22%, transparent);
+  background: color-mix(in srgb, var(--c) 18%, transparent);
 }
+.row .spk.verified { background: color-mix(in srgb, var(--c) 50%, transparent); }
+.row .spk.verified::before { content: "✓ "; }
 
 /* Auto-growing textarea: the hidden ::after mirrors the text and sets the height. */
 .grow { display: grid; flex: 1; min-width: 0; }

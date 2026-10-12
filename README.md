@@ -31,6 +31,20 @@ Projects live in the `labelfast-data` Docker volume, so they survive rebuilds an
 
 Labels can also be loaded later with **Import labels**, or by dropping a label file onto the editor. That replaces the current segments (Ctrl+Z brings them back).
 
+### Relabelling speakers
+
+You do not have to fix every speaker label by hand. Verify a few segments per speaker, and the app works out the rest by voice.
+
+1. Mark segments whose speaker you are sure of. Press `V` if the label is already right, or assign the right speaker with `1`–`9`, which verifies it too. Verified segments show a ✓ and are drawn solid in the timeline.
+2. Press `R`, or click **Relabel speakers**. Each unverified segment is compared with the verified ones and given the speaker it sounds most like.
+3. Check the result, verify more where it went wrong, and relabel again. One Ctrl+Z undoes a whole relabel.
+
+Verified segments are never changed. A segment is also left alone when it does not sound enough like any verified speaker, or is shorter than 0.4 s. So a speaker with no verified segment yet keeps their existing labels instead of being merged into someone else.
+
+Two or three verified segments of a couple of seconds each per speaker is a good start. The first run on a recording takes a few seconds per ten minutes of speech. Later runs are near instant, because the voice analysis of each segment is kept.
+
+The verified mark lives in the project only. Neither export format includes it.
+
 ### Hotkeys
 
 Press `?` in the editor for the full list.
@@ -41,7 +55,9 @@ Press `?` in the editor for the full list.
 | `Tab` | Play / pause |
 | `Shift+Tab` | Replay the segment |
 | `Esc` | Leave the text field |
-| `1`–`9` | Assign speaker |
+| `1`–`9` | Assign speaker, and mark it verified |
+| `V` | Mark the speaker as verified, or undo that |
+| `R` | Relabel unverified segments from the verified ones |
 | `N` | New segment at the playhead |
 | `[` / `]` | Set segment start / end to the playhead |
 | `S` / `M` / `X` | Split / merge with next / delete |
@@ -78,9 +94,12 @@ If a label file covers several recordings, only the entries whose file name matc
 - `app/main.py`: FastAPI server with the JSON API. It also serves the front end.
 - `app/audio.py`: converts each upload to 16-bit WAV with ffmpeg and computes the waveform. WAV keeps seeking exact, at the cost of disk space (about 115 MB per hour of 16 kHz mono).
 - `app/formats.py`: RTTM and NeMo JSON import and export.
+- `app/speakers.py`: speaker relabelling. It computes a voice embedding per segment with NVIDIA's TitaNet-small model, run on the CPU through [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), and matches unverified segments to the verified ones.
 - `app/static/`: the front end, plain HTML, CSS and JavaScript with no build step.
 
-Each project is a folder under `/data/projects/<id>/` holding `audio.wav`, `peaks.bin`, `segments.json` and `meta.json`.
+Each project is a folder under `/data/projects/<id>/` holding `audio.wav`, `peaks.bin`, `segments.json` and `meta.json`, plus `embeddings.npz` once speakers have been relabelled.
+
+The speaker model (40 MB) is downloaded when the image is built. To use a different one, mount any speaker embedding model that sherpa-onnx supports and point `LABELFAST_SPEAKER_MODEL` at it. The matching threshold in `app/speakers.py` was tuned for TitaNet-small and will need checking for another model.
 
 ### Develop without Docker
 
@@ -88,6 +107,7 @@ Needs Python 3.12 and ffmpeg.
 
 ```sh
 python -m venv .venv && .venv/bin/pip install -r requirements.txt pytest
-LABELFAST_DATA=./data .venv/bin/uvicorn app.main:app --reload
+curl -L -o speaker.onnx https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/nemo_en_titanet_small.onnx
+LABELFAST_DATA=./data LABELFAST_SPEAKER_MODEL=./speaker.onnx .venv/bin/uvicorn app.main:app --reload
 .venv/bin/python -m pytest
 ```

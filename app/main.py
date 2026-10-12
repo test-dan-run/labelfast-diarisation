@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import audio as audio_tools
-from . import formats
+from . import formats, speakers
 
 DATA_DIR = Path(os.environ.get("LABELFAST_DATA", "/data"))
 PROJECTS = DATA_DIR / "projects"
@@ -32,6 +32,7 @@ class Segment(BaseModel):
     end: float
     speaker: str
     text: str = ""
+    verified: bool = False
 
 
 def _read(path: Path):
@@ -130,6 +131,21 @@ def parse_labels(project_id: str, labels: UploadFile = File(...)) -> list[dict]:
     """Parse a label file against this project. The client decides whether to keep it."""
     meta = _read(_project_dir(project_id) / "meta.json")
     return _parse_labels(labels, meta["name"], meta["duration"])
+
+
+@app.post("/api/projects/{project_id}/relabel")
+def relabel(project_id: str) -> dict:
+    """Propose speakers for the unverified segments from the verified ones.
+
+    Works from the saved segments and changes nothing: the client applies the
+    proposals, which keeps the change undoable.
+    """
+    path = _project_dir(project_id)
+    segments = formats.normalise(_read(path / "segments.json"))
+    try:
+        return speakers.relabel(segments, path / "audio.wav", path / "embeddings.npz")
+    except speakers.SpeakerError as exc:
+        raise HTTPException(400, str(exc)) from None
 
 
 @app.get("/api/projects/{project_id}/audio")

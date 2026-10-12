@@ -13,17 +13,17 @@ docker compose down                 # stop (add -v to delete all projects)
 # without Docker (needs Python 3.12 and ffmpeg)
 python -m venv .venv && .venv/bin/pip install -r requirements.txt pytest
 LABELFAST_DATA=./data .venv/bin/uvicorn app.main:app --reload
-.venv/bin/python -m pytest          # format import/export tests
+.venv/bin/python -m pytest          # format and speaker-matching tests
 ```
 
 The front end is copied into the image at build time, so rebuild (`up -d --build`) after changing anything under `app/`.
 
-Only `app/formats.py` has automated tests. The front end has none in the repo: verify UI changes in a real browser. `state`, `seg()`, `audio` and the other top-level names in `app.js` are reachable from the console or from a Playwright `page.evaluate`, which makes scripted checks straightforward.
+Only `app/formats.py` and the matching logic in `app/speakers.py` have automated tests. Relabelling for real needs the speaker model, which the image downloads at build time (README.md has the command for running without Docker). The front end has no tests in the repo: verify UI changes in a real browser. `state`, `seg()`, `audio` and the other top-level names in `app.js` are reachable from the console or from a Playwright `page.evaluate`, which makes scripted checks straightforward.
 
 ## Design principles
 
 1. **One user, one machine.** No accounts, auth, sessions, locking or multi-user conflict handling. Do not add them. The only concession to safety is that the port binds to `127.0.0.1` by default.
-2. **Minimal.** No front-end framework, no build step, no JS dependencies, no CDN. The server has four Python dependencies. Prefer a few lines of plain code over a library, and leave out options nobody asked for.
+2. **Minimal.** No front-end framework, no build step, no JS dependencies, no CDN. The server has five Python dependencies, and the fifth (sherpa-onnx, for speaker embeddings) is only imported when relabelling runs. Prefer a few lines of plain code over a library, and leave out options nobody asked for.
 3. **Keyboard first.** The core loop (listen, fix text, fix speaker, next) must be doable without the mouse. A new editing action needs a hotkey and a line in the help dialog.
 4. **Nothing is lost.** Edits autosave, every destructive action is undoable, and bulk replacement (import) goes through undo rather than a confirmation prompt.
 5. **Fast on long recordings.** The reference case is a one-hour file with about 1,700 segments. Edits there take under 10 ms and must stay that way.
@@ -36,14 +36,18 @@ Only `app/formats.py` has automated tests. The front end has none in the repo: v
 | `app/main.py` | FastAPI app: JSON API, file storage, serves the front end |
 | `app/audio.py` | ffmpeg: transcode to WAV, compute waveform peaks |
 | `app/formats.py` | RTTM and NeMo JSON parsing and export |
+| `app/speakers.py` | Speaker relabelling: embeddings, profiles from verified segments, matching |
 | `app/static/index.html` | Markup for both views, the help dialog |
 | `app/static/app.js` | All front-end logic, one file, sectioned by comment banners |
 | `app/static/style.css` | Styles, light and dark via CSS variables |
 | `tests/test_formats.py` | Tests for `formats.py` |
+| `tests/test_speakers.py` | Tests for the matching in `speakers.py`, with hand-made vectors and no model |
 
 ## Data model
 
-A segment is `{id, start, end, speaker, text}`, times in seconds rounded to 3 decimals. Segments are kept sorted by `(start, end)`. Overlap is allowed, since speakers talk over each other.
+A segment is `{id, start, end, speaker, text, verified}`, times in seconds rounded to 3 decimals. Segments are kept sorted by `(start, end)`. Overlap is allowed, since speakers talk over each other.
+
+`verified` means the user has confirmed the speaker label. It is internal: imported segments start unverified and neither export format carries it.
 
 Each project is a folder `/data/projects/<12-hex id>/`:
 
@@ -51,6 +55,7 @@ Each project is a folder `/data/projects/<12-hex id>/`:
 - `peaks.bin`: int8 `(min, max)` pairs, 100 per second
 - `segments.json`: the list of segments
 - `meta.json`: name, duration, segment count, timestamps. It is written last on creation, so its presence marks a complete project.
+- `embeddings.npz`: cached voice embeddings, keyed by segment times. Created on the first relabel. Safe to delete.
 
 The client holds the whole segment list and saves it whole with one `PUT`. The server runs it through `formats.normalise` (clip to the audio, drop empty segments, sort) before writing.
 
@@ -64,6 +69,7 @@ The client holds the whole segment list and saves it whole with one `PUT`. The s
 | `DELETE /api/projects/{id}` | Delete |
 | `PUT /api/projects/{id}/segments` | Save the full segment list |
 | `POST /api/projects/{id}/labels` | Parse a label file and return segments. Does not save |
+| `POST /api/projects/{id}/relabel` | Propose speakers for unverified segments, from the saved segments. Does not save |
 | `GET /api/projects/{id}/audio` | WAV, with range requests |
 | `GET /api/projects/{id}/peaks` | Waveform peaks, binary |
 | `GET /api/projects/{id}/export?format=rttm\|nemo` | Download labels |
@@ -88,6 +94,13 @@ The client holds the whole segment list and saves it whole with one `PUT`. The s
 - Autosave 700 ms after the last change, with a status indicator. Ctrl+S saves immediately.
 - Light and dark themes follow the system setting.
 
+**Speaker relabelling**
+- A segment's speaker can be marked verified, with `V` or by assigning a speaker by hand. Verified segments show a ✓ in the list and are drawn solid in the timeline. The count is shown next to the segment total.
+- Relabel (`R` or the button) gives every unverified segment the verified speaker it sounds most like. Verified segments are never changed.
+- A segment stays as it is when its best match scores under the threshold or it is shorter than 0.4 s. This keeps speakers with no verified example from being absorbed into others.
+- Embeddings are cached per project, so only the first run on a recording is slow (about 6 s for 14 minutes of speech), and a moved boundary costs one new embedding.
+- The proposals are applied on the client as a single undo step. Relabelled segments stay unverified.
+
 **Formats**
 - Import detects the format from the content, not the extension.
 - RTTM in and out. RTTM has no transcript field, so export drops the text and replaces spaces in names with underscores.
@@ -104,7 +117,9 @@ The rule: `Enter`, `Tab` and `Esc` always work. Editing keys work bare outside a
 | `Enter` / `Shift+Enter` | Next / previous segment, focusing its text. Outside a text field, `Enter` first focuses the selected segment |
 | `Tab` / `Shift+Tab` | Play-pause / replay the segment |
 | `Esc` | Leave the text field |
-| `1`–`9` | Assign speaker. The first unused number adds a speaker |
+| `1`–`9` | Assign speaker and mark it verified. The first unused number adds a speaker |
+| `V` | Toggle verified on the selected segment |
+| `R` | Relabel unverified segments from the verified ones |
 | `N` | New 2-second segment at the playhead |
 | `[` / `]` | Set start / end to the playhead |
 | `S` / `M` / `X` | Split / merge with next / delete |
@@ -126,4 +141,7 @@ Keep the help dialog in `index.html` and the table in README.md in step with the
 - **`pushUndo()` goes before the mutation,** and `touch()` after it. For text, one undo step is taken per visit to a text box.
 - **Timeline geometry lives in `app.js`** (`RULER_H`, `WAVE_H`, `LANE_H`) and reaches the CSS through the `--head` and `--lane` variables, so the lane labels line up with the canvas.
 - **User-supplied strings go into the DOM as text,** through the `h()` helper, never as HTML.
-- **Exports read from disk,** so the client awaits `save()` before starting a download.
+- **Exports and relabelling read from disk,** so the client awaits `save()` before calling them.
+- **Endpoints that compute labels do not save.** Import and relabel both return segments or proposals, and the client applies them through `pushUndo()`. That is what makes them undoable.
+- **The relabel threshold (`THRESHOLD` in `speakers.py`) is tuned to the model.** At 0.45 with TitaNet-small, a synthetic 8-speaker test gave no wrong changes in 271 and left a speaker with no verified segments untouched. WeSpeaker ResNet34 through sherpa-onnx scored far worse on the same test (79% against 97% with one verified segment per speaker) and its scores did not separate known from unknown speakers. Re-tune before changing either the model or the number.
+- **Only a deliberate act verifies a segment:** `V` or assigning a speaker. Relabelling, importing and drawing a new segment do not, because verified segments are the ground truth everything else is judged against.

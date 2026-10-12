@@ -40,6 +40,7 @@
     <label class="btn" title="Replace the segments with an .rttm or NeMo .json file">
       Import labels<input type="file" id="in-import" accept=".rttm,.json,.jsonl" hidden>
     </label>
+    <button id="relabel" title="Give each unverified segment the speaker it sounds most like, judging from the verified ones (R)">Relabel speakers</button>
     <button id="export-rttm" title="Speaker turns only. RTTM has no field for the transcript">Export RTTM</button>
     <button id="export-nemo" title="NeMo manifest: one JSON object per segment, with transcript and speaker">Export NeMo JSON</button>
     <button id="open-help" title="Hotkeys (?)">?</button>
@@ -84,7 +85,9 @@
   </table>
   <p class="muted">The keys below work on their own outside a text field. While typing, hold <kbd>Alt</kbd>.</p>
   <table>
-    <tr><td><kbd>1</kbd>–<kbd>9</kbd></td><td>Assign speaker (the next free number adds a speaker)</td></tr>
+    <tr><td><kbd>1</kbd>–<kbd>9</kbd></td><td>Assign speaker and mark it verified (the next free number adds a speaker)</td></tr>
+    <tr><td><kbd>V</kbd></td><td>Mark the speaker as verified, or undo that</td></tr>
+    <tr><td><kbd>R</kbd></td><td>Relabel: give unverified segments the verified speaker they sound like</td></tr>
     <tr><td><kbd>N</kbd></td><td>New segment at the playhead</td></tr>
     <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Set segment start / end to the playhead</td></tr>
     <tr><td><kbd>S</kbd></td><td>Split at the playhead (and at the text cursor)</td></tr>

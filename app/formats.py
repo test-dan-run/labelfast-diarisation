@@ -1,7 +1,9 @@
 """Reading and writing label files: RTTM and NeMo JSON.
 
 Everything is converted to and from one internal shape, a list of
-``{"id", "start", "end", "speaker", "text"}`` dicts with times in seconds.
+``{"id", "start", "end", "speaker", "text", "verified"}`` dicts with times in
+seconds. ``verified`` marks a speaker label the user has confirmed; label files
+have no such notion, so imported segments start unverified and exports omit it.
 """
 
 from __future__ import annotations
@@ -51,6 +53,7 @@ def normalise(segments: list[dict], duration: float | None = None) -> list[dict]
                 "end": round(end, 3),
                 "speaker": str(seg.get("speaker") or DEFAULT_SPEAKER).strip() or DEFAULT_SPEAKER,
                 "text": " ".join(str(seg.get("text") or "").split()),
+                "verified": bool(seg.get("verified")),
             }
         )
     out.sort(key=lambda s: (s["start"], s["end"]))
